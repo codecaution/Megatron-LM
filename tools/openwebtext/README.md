@@ -17,8 +17,14 @@ The following steps show how to prepare training dataset to train the mode.
 python blacklist_urls.py <path to the dowloaded deduplicated URLs> <filename for clean urls. e.g. clean_urls.txt>
 ```
 3. Download the content from the clean urls with [openwebtext's utilities](https://github.com/eukaryote31/openwebtext/blob/master/download.py). 
-
+Because the download costs a long time, and any interruption may lost the compressed files. Here I choose use the uncompressed mode.
+```
+python download.py /home/superbench/clean_urls.txt --output_dir /mnt/GPT2Data --n_procs 100 --timeout 30 --chunk_size 2000 —save_uncompressed
+```
 4. Merge the contents into one loose json file with 1 json per newline of the format `{'text': text, 'url': unique_url}`. It is important for the url to be unique.
+```
+python generate_json.py
+```
 
 # Prepare the data for GPT-2 training:
 
