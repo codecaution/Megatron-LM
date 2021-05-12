@@ -31,19 +31,26 @@ python generate_json.py
 1. Perform ftfy, english detection and remove documents with less than 128 tokens. This step can be sharded and run on shards.
 ```
 python cleanup_dataset.py <input data file> <output cleaned data filename>
+python find_duplicates.py --input /workspace/GPT2data/merged_files.json --output /workspace/GPT2data/merged_files_step_1.json
 ```
 Additional cleanup (e.g. remove documents less than 512 characters or dataset specific cleaning like stories, realnews datasets) can be done using `cleanup_fix_dataset.py`. More details can be found by running `python cleanup_fix_dataset.py --help`.
 2. Using LSH, find possible duplicates and store then in a file for later processing. The code supports saving and loading fingerprints for recurrent deduplications, and is also multithreaded for faster processing. More details are can be found by `python find_duplicate.py --help`.
 ```
 python find_duplicates.py --inputs <pairlist list of input cleaned data files and keys, e.g. cc.json cc_id news.json news_id> --output <output possible duplicate urls filename>
+python find_duplicates.py --input /workspace/GPT2data/merged_files_step_1.json --output /workspace/GPT2data/merged_files_step_2.json
+7.34h
 ```
 3. Based on similarity measure defind inside function `is_similar` (default: 0.9), group urls that are similar. Basically, for each group, only one url we should keep and remove the rest.
 ```
 python group_duplicate_urls.py <possible duplicate urls file> <output file containing similar urls>
+out of 2166007 urls, only 725941 are unique and 1440066 should be removed
 ```
 4. Remove similar documents that were detected in the last step.
 ```
 python remove_group_duplicates.py <file containing simialr documents> <cleaned data file> <outputfile containing deduplicate data>
+python remove_group_duplicates.py /workspace/GPT2data/merged_files_step_3.json /workspace/GPT2data/merged_files_step_1.json /workspace/GPT2data/merged_files_step_4.json
+[PROCESSED] time (s): 652.18 | written: 8808247 | removed: 1440189 (char: 7348476825)
+
 ```
 
 5. Shuffle the dataset.

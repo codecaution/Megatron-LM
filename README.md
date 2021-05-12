@@ -114,6 +114,24 @@ python tools/preprocess_data.py \
        --merge-file gpt2-merges.txt \
        --append-eod
 </pre>
+The vocab.json and merge.txt can be downloaded from huggingface:
+<pre>
+    "vocab_file": {
+        "gpt2": "https://huggingface.co/gpt2/resolve/main/vocab.json",
+        "gpt2-medium": "https://huggingface.co/gpt2-medium/resolve/main/vocab.json",
+        "gpt2-large": "https://huggingface.co/gpt2-large/resolve/main/vocab.json",
+        "gpt2-xl": "https://huggingface.co/gpt2-xl/resolve/main/vocab.json",
+        "distilgpt2": "https://huggingface.co/distilgpt2/resolve/main/vocab.json",
+    },
+    "merges_file": {
+        "gpt2": "https://huggingface.co/gpt2/resolve/main/merges.txt",
+        "gpt2-medium": "https://huggingface.co/gpt2-medium/resolve/main/merges.txt",
+        "gpt2-large": "https://huggingface.co/gpt2-large/resolve/main/merges.txt",
+        "gpt2-xl": "https://huggingface.co/gpt2-xl/resolve/main/merges.txt",
+        "distilgpt2": "https://huggingface.co/distilgpt2/resolve/main/merges.txt",
+    },
+    reference: https://huggingface.co/transformers/_modules/transformers/tokenization_gpt2.html
+</pre> 
 
 Here the output files are named `my-gpt2_text_document.bin` and `my-gpt2_text_document.idx`. As before, in GPT training, use the longer name without the extension as `--data-path`.
 
