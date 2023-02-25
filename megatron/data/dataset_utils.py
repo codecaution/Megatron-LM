@@ -28,9 +28,9 @@ import torch
 
 from megatron import (
     get_args,
-    mpu,
     print_rank_0
 )
+from megatron.core import mpu
 from megatron.data.blendable_dataset import BlendableDataset
 from megatron.data.indexed_dataset import make_dataset as make_indexed_dataset
 
@@ -63,12 +63,18 @@ def get_datasets_weights_and_num_samples(data_prefix,
     # Add 0.5% (the 1.005 factor) so in case the bleding dataset does
     # not uniformly distribute the number of samples, we still have
     # samples left to feed to the network.
-    datasets_train_valid_test_num_samples = []
-    for weight in weights:
-        datasets_train_valid_test_num_samples.append(
-            [int(math.ceil(val * weight * 1.005))
-             for val in train_valid_test_num_samples])
-
+    if isinstance(train_valid_test_num_samples, list):
+        datasets_train_valid_test_num_samples = []
+        for weight in weights:
+            datasets_train_valid_test_num_samples.append(
+                [int(math.ceil(val * weight * 1.005))
+                for val in train_valid_test_num_samples])
+    else:
+        # Used when separate dataset files are provided for train,
+        # valid and test
+        datasets_train_valid_test_num_samples = [
+            int(math.ceil(train_valid_test_num_samples * weight * 1.005))
+            for weight in weights]
 
     return prefixes, weights, datasets_train_valid_test_num_samples
 
@@ -674,7 +680,7 @@ def get_samples_mapping(indexed_dataset,
         # Build samples mapping
         verbose = torch.distributed.get_rank() == 0
         start_time = time.time()
-        print_rank_0(' > building sapmles index mapping for {} ...'.format(
+        print_rank_0(' > building samples index mapping for {} ...'.format(
             name))
         # First compile and then import.
         from megatron.data import helpers
@@ -688,7 +694,7 @@ def get_samples_mapping(indexed_dataset,
             seed,
             verbose,
             2 if binary_head else 1)
-        print_rank_0(' > done building sapmles index maping')
+        print_rank_0(' > done building samples index maping')
         np.save(indexmap_filename, samples_mapping, allow_pickle=True)
         print_rank_0(' > saved the index mapping in {}'.format(
             indexmap_filename))

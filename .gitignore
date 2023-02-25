@@ -1,6 +1,5 @@
 __pycache__
-
-# Distribution / packaging
-build/
-dist/
-*.egg-info/
+*.so
+build
+.coverage_*
+*.egg-info

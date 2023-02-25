@@ -19,6 +19,7 @@ python -m torch.distributed.launch $DISTRIBUTED_ARGS \
        pretrain_gpt.py \
        --tensor-model-parallel-size 2 \
        --pipeline-model-parallel-size 2 \
+       --sequence-parallel \
        --num-layers 24 \
        --hidden-size 1024 \
        --num-attention-heads 16 \
@@ -42,7 +43,7 @@ python -m torch.distributed.launch $DISTRIBUTED_ARGS \
        --weight-decay 1e-2 \
        --clip-grad 1.0 \
        --lr-warmup-fraction .01 \
-       --checkpoint-activations \
+       --activations-checkpoint-method uniform \
        --log-interval 100 \
        --save-interval 10000 \
        --eval-interval 1000 \
