@@ -26,21 +26,44 @@ def parallel_lm_logits(input_, word_embeddings_weight, parallel_output,
         async_grad_allreduce = args.async_tensor_model_parallel_allreduce and \
             model_parallel and not args.sequence_parallel
     else:
-        input_parallel = tensor_parallel.copy_to_tensor_model_parallel_region(input_)
+        input_parallel = tensor_parallel.copy_to_embedding_parallel_region(input_)
+    #    input_parallel = tensor_parallel.identity(input_parallel)
         async_grad_allreduce = False
 
-    # Matrix multiply.
-    logits_parallel = tensor_parallel.linear_with_grad_accumulation_and_async_allreduce(
-        input=input_parallel,
-        weight=word_embeddings_weight,
-        bias=bias,
-        gradient_accumulation_fusion=args.gradient_accumulation_fusion,
-        async_grad_allreduce=async_grad_allreduce,
-        sequence_parallel_enabled=args.sequence_parallel)
+    input_parallel = tensor_parallel.gather_from_data_parallel_region_dim_1(input_parallel)
+    # [2048, 8, 224]
+    # split and use for_loop
+        # Matrix multiply.
+    outputs = tensor_parallel.linear_with_grad_accumulation_and_async_allreduce_for_embedding(
+            input=input_parallel,
+            weight=word_embeddings_weight,
+            bias=bias,
+            gradient_accumulation_fusion=args.gradient_accumulation_fusion,
+            async_grad_allreduce=async_grad_allreduce,
+            sequence_parallel_enabled=args.sequence_parallel)
+    # [2048, 8, 31360]
     # Gather if needed.
+    """
+    backward is CORRECT till this point
+    
+    """
+    #logits_parallel = tensor_parallel.identity(logits_parallel)
+    outputs = torch.chunk(outputs, 2 ,dim=1)
+    outputs = torch.cat(outputs, dim=0).contiguous()
+    # [4096, 4, 31360]
+    #new_outputs = torch.empty_like(outputs)
+    #torch.distributed.all_to_all_single(new_outputs, outputs, group=mpu.get_data_parallel_group())
+    #outputs = tensor_parallel.identity(outputs)
+    new_outputs = tensor_parallel.all_to_all_among_data_parallel_region(outputs)
+    output = torch.cat(torch.chunk(new_outputs, 2, 0), dim=2).contiguous()
+    # [2048, 4, 62720]
+    #output = tensor_parallel.identity(output)
+    #new_outputs = [torch.empty_like(outputs[0]) for i in range(2)]
+    #torch.distributed.all_to_all(new_outputs, outputs, group=mpu.get_data_parallel_group())
+    # all reduce within data_parallel group
 
     if parallel_output:
-        return logits_parallel
+        return output
 
     return tensor_parallel.gather_from_tensor_model_parallel_region(logits_parallel)
 

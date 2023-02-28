@@ -5,7 +5,10 @@ import torch
 from megatron.core.parallel_state import (
     get_tensor_model_parallel_group,
     get_tensor_model_parallel_rank,
-    get_tensor_model_parallel_world_size
+    get_tensor_model_parallel_world_size,
+    get_embedding_parallel_group,
+    get_embedding_parallel_rank,
+    get_data_parallel_rank
 )
 
 from .utils import VocabUtility
@@ -27,10 +30,9 @@ class _VocabParallelCrossEntropy(torch.autograd.Function):
         # Get the partition's vocab indecies
         get_vocab_range = VocabUtility.vocab_range_from_per_partition_vocab_size
         partition_vocab_size = vocab_parallel_logits.size()[-1]
-        rank = get_tensor_model_parallel_rank()
-        world_size = get_tensor_model_parallel_world_size()
-        vocab_start_index, vocab_end_index = get_vocab_range(
-            partition_vocab_size, rank, world_size)
+        tp_rank = get_tensor_model_parallel_rank()
+        vocab_start_index = tp_rank * partition_vocab_size
+        vocab_end_index = vocab_start_index + partition_vocab_size
 
         # Create a mask of valid vocab ids (1 means it needs to be masked).
         target_mask = (target < vocab_start_index) | (target >= vocab_end_index)

@@ -7,18 +7,29 @@ from typing import Optional
 
 from .utils import GlobalMemoryBuffer
 
+# added by zpx
+# currently, (0, 8)
+_EMBEDDING_PARALLEL_GROUP = None
+_MPU_EMBEDDING_PARALLEL_RANK = None
+
 # Intra-layer model parallel group that the current rank belongs to.
 _TENSOR_MODEL_PARALLEL_GROUP = None
+_TENSOR_MODEL_PARALLEL_GROUP_RANKS = None
 # Inter-layer model parallel group that the current rank belongs to.
 _PIPELINE_MODEL_PARALLEL_GROUP = None
+_PIPELINE_MODEL_PARALLEL_GROUP_RANKS = None
 # Model parallel group (both intra- and pipeline) that the current rank belongs to.
 _MODEL_PARALLEL_GROUP = None
+_MODEL_PARALLEL_GROUP_RANKS = None
 # Embedding group.
 _EMBEDDING_GROUP = None
+_EMBEDDING_GROUP_RANKS = None
 # Position embedding group.
 _POSITION_EMBEDDING_GROUP = None
+_POSITION_EMBEDDING_GROUP_RANKS = None
 # Data parallel group that the current rank belongs to.
 _DATA_PARALLEL_GROUP = None
+_DATA_PARALLEL_GROUP_RANKS = None
 
 _VIRTUAL_PIPELINE_MODEL_PARALLEL_RANK = None
 _VIRTUAL_PIPELINE_MODEL_PARALLEL_WORLD_SIZE = None
@@ -98,6 +109,11 @@ def initialize_model_parallel(
     num_pipeline_model_parallel_groups: int = world_size // pipeline_model_parallel_size
     num_data_parallel_groups: int = world_size // data_parallel_size
 
+    global _EMBEDDING_PARALLEL_GROUP 
+    assert _EMBEDDING_PARALLEL_GROUP == None
+    embedding_parallel_ranks = range(0, 8)
+    _EMBEDDING_PARALLEL_GROUP = torch.distributed.new_group(embedding_parallel_ranks)
+
     if virtual_pipeline_model_parallel_size is not None:
         if not pipeline_model_parallel_size > 2:
             raise RuntimeError("pipeline-model-parallel size should be greater than 2 with "
@@ -117,6 +133,7 @@ def initialize_model_parallel(
     global _DATA_PARALLEL_GROUP
     global _DATA_PARALLEL_GLOBAL_RANKS
     assert _DATA_PARALLEL_GROUP is None, 'data parallel group is already initialized'
+
     all_data_parallel_group_ranks = []
     for i in range(pipeline_model_parallel_size):
         start_rank = i * num_pipeline_model_parallel_groups
@@ -128,9 +145,12 @@ def initialize_model_parallel(
             if rank in ranks:
                 _DATA_PARALLEL_GROUP = group
                 _DATA_PARALLEL_GLOBAL_RANKS = ranks
+                _DATA_PARALLEL_GROUP_RANKS = ranks
 
     # Build the model-parallel groups.
     global _MODEL_PARALLEL_GROUP
+    global _MODEL_PARALLEL_GROUP_RANKS
+
     assert _MODEL_PARALLEL_GROUP is None, 'model parallel group is already initialized'
     for i in range(data_parallel_size):
         ranks = [data_parallel_group_ranks[i]
@@ -138,9 +158,12 @@ def initialize_model_parallel(
         group = torch.distributed.new_group(ranks)
         if rank in ranks:
             _MODEL_PARALLEL_GROUP = group
+            _MODEL_PARALLEL_GROUP_RANKS = ranks
 
     # Build the tensor model-parallel groups.
     global _TENSOR_MODEL_PARALLEL_GROUP
+    global _TENSOR_MODEL_PARALLEL_GROUP_RANKS
+
     assert _TENSOR_MODEL_PARALLEL_GROUP is None, \
         'tensor model parallel group is already initialized'
     for i in range(num_tensor_model_parallel_groups):
@@ -149,17 +172,21 @@ def initialize_model_parallel(
         group = torch.distributed.new_group(ranks)
         if rank in ranks:
             _TENSOR_MODEL_PARALLEL_GROUP = group
+            _TENSOR_MODEL_PARALLEL_GROUP_RANKS = ranks
 
     # Build the pipeline model-parallel groups and embedding groups
     # (first and last rank in each pipeline model-parallel group).
     global _PIPELINE_MODEL_PARALLEL_GROUP
+    global _PIPELINE_MODEL_PARALLEL_GROUP_RANKS
     global _PIPELINE_GLOBAL_RANKS
     assert _PIPELINE_MODEL_PARALLEL_GROUP is None, \
         'pipeline model parallel group is already initialized'
     global _EMBEDDING_GROUP
+    global _EMBEDDING_GROUP_RANKS
     global _EMBEDDING_GLOBAL_RANKS
     assert _EMBEDDING_GROUP is None, 'embedding group is already initialized'
     global _POSITION_EMBEDDING_GROUP
+    global _POSITION_EMBEDDINg_GROUP_RANKS
     global _POSITION_EMBEDDING_GLOBAL_RANKS
     assert _POSITION_EMBEDDING_GROUP is None, \
         'position embedding group is already initialized'
@@ -169,6 +196,7 @@ def initialize_model_parallel(
         if rank in ranks:
             _PIPELINE_MODEL_PARALLEL_GROUP = group
             _PIPELINE_GLOBAL_RANKS = ranks
+            _PIPELINE_MODEL_PARALLEL_GROUP_RANKS = ranks
         # Setup embedding group (to exchange gradients between
         # first and last stages).
         if len(ranks) > 1:
@@ -189,12 +217,14 @@ def initialize_model_parallel(
         group = torch.distributed.new_group(embedding_ranks)
         if rank in embedding_ranks:
             _EMBEDDING_GROUP = group
+            _EMBEDDING_GROUP_RANKS = embedding_ranks
         if rank in ranks:
             _EMBEDDING_GLOBAL_RANKS = embedding_ranks
 
         group = torch.distributed.new_group(position_embedding_ranks)
         if rank in position_embedding_ranks:
             _POSITION_EMBEDDING_GROUP = group
+            _POSITION_EMBEDDING_GROUP_RANKS = position_embedding_ranks
         if rank in ranks:
             _POSITION_EMBEDDING_GLOBAL_RANKS = position_embedding_ranks
 
@@ -203,6 +233,8 @@ def initialize_model_parallel(
     # put this. If we end up with a more generic initialization of megatron-core
     # we could stick it there
     _set_global_memory_buffer()
+
+    print("_DATA_PARALLEL_GROUP:", _DATA_PARALLEL_GROUP_RANKS)
 
 
 def model_parallel_is_initialized():
@@ -295,6 +327,11 @@ def set_pipeline_model_parallel_rank(rank):
     global _MPU_PIPELINE_MODEL_PARALLEL_RANK
     _MPU_PIPELINE_MODEL_PARALLEL_RANK = rank
 
+def get_embedding_parallel_rank():
+    global _MPU_EMBEDDING_PARALLEL_RANK
+    if _MPU_EMBEDDING_PARALLEL_RANK is not None:
+        return _MPU_EMBEDDING_PARALLEL_RANK
+    return torch.distributed.get_rank(group=get_embedding_parallel_group())
 
 def set_pipeline_model_parallel_split_rank(rank):
     """Set pipeline model parallel split rank."""
@@ -491,6 +528,9 @@ def get_global_memory_buffer():
     assert _GLOBAL_MEMORY_BUFFER is not None, 'global memory buffer is not initialized'
     return _GLOBAL_MEMORY_BUFFER
 
+def get_embedding_parallel_group():
+    assert _EMBEDDING_PARALLEL_GROUP is not None, 'embedding parallel group is not initialized'
+    return _EMBEDDING_PARALLEL_GROUP
 
 def destroy_model_parallel():
     """Set the groups to none."""

@@ -9,7 +9,8 @@ from .layers import (
     set_defaults_if_not_set_tensor_model_parallel_attributes,
     copy_tensor_model_parallel_attributes,
     param_is_not_tensor_parallel_duplicate,
-    linear_with_grad_accumulation_and_async_allreduce
+    linear_with_grad_accumulation_and_async_allreduce,
+    linear_with_grad_accumulation_and_async_allreduce_for_embedding
 
 )
 
@@ -17,8 +18,15 @@ from .mappings import (
     copy_to_tensor_model_parallel_region,
     gather_from_tensor_model_parallel_region,
     gather_from_sequence_parallel_region,
+    gather_from_data_parallel_region_dim_0,
+    gather_from_data_parallel_region_dim_1,
+    scatter_to_data_parallel_region_dim_0,
+    scatter_to_data_parallel_region_dim_1,
     scatter_to_tensor_model_parallel_region,
     scatter_to_sequence_parallel_region,
+    all_to_all_among_data_parallel_region,
+    identity,
+    copy_to_embedding_parallel_region
 )
 
 from .random import (

@@ -33,6 +33,32 @@ def split_tensor_along_last_dim(
 
     return tensor_list
 
+def split_tensor_along_second_dim(
+    tensor: torch.Tensor,
+    num_partitions: int,
+    contiguous_split_chunks: bool = False,
+) -> List[torch.Tensor]:
+    """ Split a tensor along its last dimension.
+
+        Arguments:
+            tensor: input tensor.
+            num_partitions: number of partitions to split the tensor
+            contiguous_split_chunks: If True, make each chunk contiguous
+                                     in memory.
+
+        Returns:
+            A list of Tensors
+    """
+    # Get the size and dimension.
+    size = divide(tensor.size()[1], num_partitions)
+    # Split.
+    tensor_list = torch.split(tensor, size, dim=1)
+    # Note: torch.split does not create contiguous tensors by default.
+    if contiguous_split_chunks:
+        return tuple(chunk.contiguous() for chunk in tensor_list)
+
+    return tensor_list
+
 def split_tensor_into_1d_equal_chunks(tensor, new_buffer=False):
     """ Break a tensor into equal 1D chunks across tensor parallel ranks.
 
@@ -94,15 +120,16 @@ class VocabUtility:
 
     @staticmethod
     def vocab_range_from_per_partition_vocab_size(
-        per_partition_vocab_size: int, rank, world_size: int
+        per_partition_vocab_size: int, tp_rank, dp_rank, world_size: int
     ) -> Sequence[int]:
+        rank = 2*tp_rank + dp_rank
         index_f = rank * per_partition_vocab_size
         index_l = index_f + per_partition_vocab_size
         return index_f, index_l
 
     @staticmethod
-    def vocab_range_from_global_vocab_size(global_vocab_size: int, rank: int, world_size: int) -> Sequence[int]:
+    def vocab_range_from_global_vocab_size(global_vocab_size: int, tp_rank: int, dp_rank,  world_size: int) -> Sequence[int]:
         per_partition_vocab_size = divide(global_vocab_size, world_size)
         return VocabUtility.vocab_range_from_per_partition_vocab_size(
-            per_partition_vocab_size, rank, world_size
+            per_partition_vocab_size, tp_rank, dp_rank, world_size
         )
