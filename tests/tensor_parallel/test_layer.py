@@ -64,49 +64,54 @@ def test_vocab_parallel_embedding():
 
 
 def test_embedding_parallel_embedding():
-    Utils.initialize_model_parallel(4, 1, 8)
-
     batch_size = 32
     seq_length = 24
     vocab_size = 48
     hidden_size = 64
     seed = 1234
 
+    Utils.initialize_model_parallel(4, 1, 1)
+
     set_random_seed(seed)
-    input_data = torch.LongTensor(
+    input_data1 = torch.LongTensor(
         size=(batch_size, seq_length)).random_(0, vocab_size).cuda()
-    loss_weight = torch.randn([batch_size, seq_length, hidden_size]).cuda()
-
-    set_random_seed(seed)
-    embedding_original = torch.nn.Embedding(vocab_size, hidden_size).cuda()
-
-    output = embedding_original(input_data)
-    loss_original = torch.mul(output, loss_weight).sum()
-    loss_original.backward()
+    loss_weight1 = torch.randn([batch_size, seq_length, hidden_size]).cuda().double()
 
     set_random_seed(seed)
     embedding_vocab_parallel = tensor_parallel.VocabParallelEmbedding(
-        vocab_size, hidden_size, init_method=init.normal_, use_cpu_initialization=True).cuda()
-    parallel_output = embedding_vocab_parallel(input_data)
-    loss_vocab_parallel = torch.mul(parallel_output, loss_weight).sum()
+        vocab_size, hidden_size, init_method=init.normal_, use_cpu_initialization=True).cuda().double()
+    parallel_output = embedding_vocab_parallel(input_data1)
+    loss_vocab_parallel = torch.mul(parallel_output, loss_weight1).sum()
     loss_vocab_parallel.backward()
+
+    Utils.destroy_model_parallel()
+
+    Utils.initialize_model_parallel(4, 1, 8)
+
+    set_random_seed(seed)
+    input_data2 = torch.LongTensor(
+        size=(batch_size, seq_length)).random_(0, vocab_size).cuda()
+    loss_weight2 = torch.randn([batch_size, seq_length, hidden_size]).cuda().double()
+
+    set_random_seed(seed)
+    embedding_vocab_parallel_ep = tensor_parallel.VocabParallelEmbedding(
+        vocab_size, hidden_size, init_method=init.normal_, use_cpu_initialization=True).cuda().double()
+    parallel_output = embedding_vocab_parallel_ep(input_data2)
+    loss_vocab_parallel_ep = torch.mul(parallel_output, loss_weight2).sum()
+    loss_vocab_parallel_ep.backward()
 
     torch.distributed.barrier()
     # assert(torch.allclose(loss_original, loss_vocab_parallel))
-    assert (torch.equal(loss_original, loss_vocab_parallel))
-
-    ep_rank = get_embedding_model_parallel_rank()
-    ep_size = get_embedding_model_parallel_world_size()
-    tp_size = get_tensor_model_parallel_world_size()
-    offset = ep_rank // tp_size
-    row = ep_rank % tp_size
-    stride = ep_size // tp_size
-
-    weight_grad_orig = torch.split(embedding_original.weight.grad,
-                                   vocab_size // get_embedding_model_parallel_world_size(),
-                                   0)[row * stride + offset]
-
-    assert (torch.allclose(weight_grad_orig, embedding_vocab_parallel.weight.grad, atol=1e-6))
+    assert (torch.equal(loss_vocab_parallel, loss_vocab_parallel_ep))
+    # print(torch.abs(embedding_vocab_parallel.weight.grad - embedding_vocab_parallel_ep.weight.grad).max())
+    # assert (torch.equal(embedding_vocab_parallel.weight.grad, embedding_vocab_parallel_ep.weight.grad))
+    # assert (torch.allclose(embedding_vocab_parallel.weight.grad, embedding_vocab_parallel_ep.weight.grad, atol=1e-12))
+    if get_embedding_model_parallel_rank() < 4:
+        print(torch.abs(embedding_vocab_parallel.weight.grad[:(vocab_size // get_embedding_model_parallel_world_size())] - embedding_vocab_parallel_ep.weight.grad).max())
+        assert (torch.allclose(embedding_vocab_parallel.weight.grad[:(vocab_size // get_embedding_model_parallel_world_size())], embedding_vocab_parallel_ep.weight.grad, atol=1e-12))
+    else:
+        print(torch.abs(embedding_vocab_parallel.weight.grad[(vocab_size // get_embedding_model_parallel_world_size()):] - embedding_vocab_parallel_ep.weight.grad).max())
+        assert (torch.allclose(embedding_vocab_parallel.weight.grad[(vocab_size // get_embedding_model_parallel_world_size()):], embedding_vocab_parallel_ep.weight.grad, atol=1e-12))
 
     Utils.destroy_model_parallel()
 
@@ -195,7 +200,7 @@ def test_linear_with_grad_accumulation_and_async_allreduce_ep():
     set_random_seed(seed)
     input_data2 = torch.randn([batch_size, seq_length, hidden_size]).cuda().double()
     input_data2.requires_grad = True
-    bias2 = torch.ones([vocab_size//8]).cuda().double()
+    bias2 = torch.ones([vocab_size//4]).cuda().double()
     bias2.requires_grad = True
 
     set_random_seed(seed)
@@ -206,28 +211,29 @@ def test_linear_with_grad_accumulation_and_async_allreduce_ep():
     parallel_output_ep = tensor_parallel.linear_with_grad_accumulation_and_async_allreduce(input_data2, embedding_vocab_parallel_ep.weight, bias=bias2,
                                                                                         gradient_accumulation_fusion=False,
                                                                                         async_grad_allreduce=False,
-                                                                                        sequence_parallel_enabled=False)
+                                                                                        sequence_parallel_enabled=False,
+                                                                                        parallel_logits=True)
 
     loss_vocab_parallel_ep = torch.mul(parallel_output_ep, loss_weight).sum()
     loss_vocab_parallel_ep.backward()
     
     torch.distributed.barrier()
-    # assert (torch.equal(, parallel_output_ep))
-    print(torch.abs(parallel_output - parallel_output_ep).max())
-    assert (torch.allclose(parallel_output, parallel_output_ep, atol=1e-5))
-    assert (torch.allclose(input_data.grad, input_data2.grad, atol=1e-5))
-    if get_embedding_model_parallel_rank() < 4:
-        assert (torch.allclose(embedding_vocab_parallel.weight.grad[:(vocab_size // get_embedding_model_parallel_world_size())], embedding_vocab_parallel_ep.weight.grad, atol=1e-5))
-        assert (torch.allclose(bias1.grad[:(vocab_size // get_embedding_model_parallel_world_size())], bias2.grad, atol=1e-5))
-    else:
-        assert (torch.allclose(embedding_vocab_parallel.weight.grad[(vocab_size // get_embedding_model_parallel_world_size()):], embedding_vocab_parallel_ep.weight.grad, atol=1e-5))
-        assert (torch.allclose(bias1.grad[(vocab_size // get_embedding_model_parallel_world_size()):], bias2.grad, atol=1e-5))
-    # assert False
-    Utils.destroy_model_parallel()
-    # # assert False
-    # 
 
-# 
+    print(torch.abs(parallel_output - parallel_output_ep).max())
+    print(parallel_output.size(), parallel_output_ep.size())
+    # assert (torch.equal(parallel_output, parallel_output_ep))
+    # assert (torch.equal(input_data.grad, input_data2.grad))
+    # assert (torch.equal(bias1.grad, bias2.grad))
+    assert (torch.allclose(parallel_output, parallel_output_ep, atol=1e-12))
+    assert (torch.allclose(input_data.grad, input_data2.grad, atol=1e-12))
+    assert (torch.allclose(bias1.grad, bias2.grad, atol=1e-12))
+
+    if get_embedding_model_parallel_rank() < 4:
+        assert (torch.allclose(embedding_vocab_parallel.weight.grad[:(vocab_size // get_embedding_model_parallel_world_size())], embedding_vocab_parallel_ep.weight.grad, atol=1e-12))
+    else:
+        assert (torch.allclose(embedding_vocab_parallel.weight.grad[(vocab_size // get_embedding_model_parallel_world_size()):], embedding_vocab_parallel_ep.weight.grad, atol=1e-12))
+
+    Utils.destroy_model_parallel()
 #     loss = torch.mul(output, loss_weight).sum()
 #     loss.backward()
     

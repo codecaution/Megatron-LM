@@ -322,6 +322,9 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
         input, weight = ctx.saved_tensors
         use_bias = ctx.use_bias
 
+        grad_bias = grad_output.view(grad_output.shape[0] * grad_output.shape[1],
+                                       grad_output.shape[2]).sum(dim=0) if use_bias else None
+
         if ctx.embedding_parallel and ctx.parallel_logits:
             grad_output = torch.cat(torch.chunk(grad_output, get_embedding_model_parallel_world_size()//get_tensor_model_parallel_world_size(), dim = -1), dim = 0)
             grad_output = _exchange_across_embedding_parallel_group(grad_output, extend_input=False, reduce_output=False)
@@ -391,23 +394,20 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
         else:
             grad_weight = grad_output.t().matmul(total_input)
 
-        grad_bias = grad_output.sum(dim=0) if use_bias else None
-
         if ctx.embedding_parallel and ctx.parallel_logits:
             grad_input = reduce_from_embedding_model_parallel_region(grad_input)
             scale = get_tensor_model_parallel_world_size() / get_embedding_model_parallel_world_size()
             grad_weight = scale * grad_weight 
-            grad_bias = scale * grad_bias if use_bias else None
             # grad_weight = grad_weight / (get_embedding_model_parallel_world_size()//get_tensor_model_parallel_world_size())
 
         if ctx.sequence_parallel:
             handle.wait()
-            return sub_grad_input, grad_weight, grad_bias, None, None, None
+            return sub_grad_input, grad_weight, grad_bias, None, None, None, None
 
         if ctx.async_grad_allreduce:
             handle.wait()
 
-        return grad_input, grad_weight, grad_bias, None, None, None
+        return grad_input, grad_weight, grad_bias, None, None, None, None
 
 def linear_with_grad_accumulation_and_async_allreduce(
     input: torch.Tensor,
@@ -477,6 +477,7 @@ def linear_with_grad_accumulation_and_async_allreduce(
         gradient_accumulation_fusion,
         async_grad_allreduce,
         sequence_parallel_enabled,
+        parallel_logits,
     ]
 
     if not linear_with_grad_accumulation_and_async_allreduce.warned:
