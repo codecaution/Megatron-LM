@@ -76,20 +76,12 @@ class MegatronModule(torch.nn.Module):
             self._word_embeddings_for_head_key = 'word_embeddings_for_head'
             # set word_embeddings weights to 0 here, then copy first
             # stage's weights using all_reduce below.
-            if args.embedding_parallel_size == 1:
-                self.word_embeddings = tensor_parallel.VocabParallelEmbedding(
-                    args.padded_vocab_size, args.hidden_size,
-                    init_method=init_method_normal(args.init_method_std),
-                    params_dtype=args.params_dtype,
-                    use_cpu_initialization=args.use_cpu_initialization,
-                    perform_initialization=args.perform_initialization)
-            else:
-                self.word_embeddings = tensor_parallel.VocabParallelEmbeddingImproved(
-                    args.padded_vocab_size, args.hidden_size,
-                    init_method=init_method_normal(args.init_method_std),
-                    params_dtype=args.params_dtype,
-                    use_cpu_initialization=args.use_cpu_initialization,
-                    perform_initialization=args.perform_initialization)
+            self.word_embeddings = tensor_parallel.VocabParallelEmbedding(
+                args.padded_vocab_size, args.hidden_size,
+                init_method=init_method_normal(args.init_method_std),
+                params_dtype=args.params_dtype,
+                use_cpu_initialization=args.use_cpu_initialization,
+                perform_initialization=args.perform_initialization)
             self.word_embeddings.weight.data.fill_(0)
             self.word_embeddings.weight.shared = True
 
