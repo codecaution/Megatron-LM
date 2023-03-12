@@ -106,3 +106,21 @@ class VocabUtility:
         return VocabUtility.vocab_range_from_per_partition_vocab_size(
             per_partition_vocab_size, rank, world_size
         )
+
+    @staticmethod
+    def vocab_range_from_per_partition_vocab_size_ep(
+        per_partition_vocab_size: int, rank, world_size: int, tensor_parallel_size: int
+    ) -> Sequence[int]:
+        offset = rank // tensor_parallel_size
+        row = rank % tensor_parallel_size
+        stride = world_size // tensor_parallel_size
+        index_f = (row * stride + offset) * per_partition_vocab_size
+        index_l = index_f + per_partition_vocab_size
+        return index_f, index_l
+
+    @staticmethod
+    def vocab_range_from_global_vocab_size_ep(global_vocab_size: int, rank: int, world_size: int, tensor_parallel_size: int) -> Sequence[int]:
+        per_partition_vocab_size = divide(global_vocab_size, world_size)
+        return VocabUtility.vocab_range_from_per_partition_vocab_size_ep(
+            per_partition_vocab_size, rank, world_size, tensor_parallel_size
+        )

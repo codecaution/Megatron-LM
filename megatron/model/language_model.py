@@ -28,7 +28,6 @@ def parallel_lm_logits(input_, word_embeddings_weight, parallel_output,
     else:
         input_parallel = tensor_parallel.copy_to_tensor_model_parallel_region(input_)
         async_grad_allreduce = False
-
     # Matrix multiply.
     logits_parallel = tensor_parallel.linear_with_grad_accumulation_and_async_allreduce(
         input=input_parallel,
@@ -36,7 +35,8 @@ def parallel_lm_logits(input_, word_embeddings_weight, parallel_output,
         bias=bias,
         gradient_accumulation_fusion=args.gradient_accumulation_fusion,
         async_grad_allreduce=async_grad_allreduce,
-        sequence_parallel_enabled=args.sequence_parallel)
+        sequence_parallel_enabled=args.sequence_parallel,
+        parallel_logits=True)
     # Gather if needed.
 
     if parallel_output:

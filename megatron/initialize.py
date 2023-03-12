@@ -184,6 +184,7 @@ def _initialize_distributed():
         else:
             mpu.initialize_model_parallel(args.tensor_model_parallel_size,
                                            args.pipeline_model_parallel_size,
+                                           args.embedding_model_parallel_size,
                                            args.virtual_pipeline_model_parallel_size,
                                            args.pipeline_model_parallel_split_rank)
             if args.rank == 0:
@@ -191,6 +192,8 @@ def _initialize_distributed():
                       f'{mpu.get_tensor_model_parallel_world_size()}')
                 print(f'> initialized pipeline model parallel with size '
                       f'{mpu.get_pipeline_model_parallel_world_size()}')
+                print(f'> initialized embedding model parallel with size '
+                      f'{mpu.get_embedding_model_parallel_world_size()}')
 
 
 def _init_autoresume():

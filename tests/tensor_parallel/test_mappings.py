@@ -133,3 +133,35 @@ def test_ReduceScatterToSequenceParallelRegion():
     assert(torch.equal(output_data, expected_output))
     Utils.destroy_model_parallel()
 
+def test_GatherFromEmbeddingModelParallelRegion():
+    Utils.initialize_model_parallel(tensor_model_parallel_size=4, pipeline_model_parallel_size=1, embedding_model_parallel_size=8)
+    input_data = torch.ones(2, 3, 4).cuda()
+    input_data = input_data * 4 if Utils.rank < 4 else input_data * 11
+    output_data = mappings._GatherFromEmbeddingModelParallelRegion.symbolic(None, input_data)
+    result = torch.cat((
+        torch.ones(2, 3, 4) * 4,
+        torch.ones(2, 3, 4) * 11
+    )).cuda()
+    print(output_data.size(), result.size())
+    print(output_data)
+    print(result)
+    assert(torch.equal(output_data, result))
+    assert(torch.equal(mappings.gather_from_embedding_model_parallel_region(input_data), result))
+    Utils.destroy_model_parallel()
+
+
+def test_ScatterToEmbeddingModelParallelRegion():
+    Utils.initialize_model_parallel(tensor_model_parallel_size=4, pipeline_model_parallel_size=1, embedding_model_parallel_size=8)
+    input_data = torch.cat((
+                    torch.ones(2, 3, 4) * (1 + Utils.rank),
+                    torch.ones(2, 3, 4) * (1 + Utils.rank + 8)
+                    )).cuda()
+    output_data = mappings._GatherFromEmbeddingModelParallelRegion.backward(None, input_data)
+    result = torch.ones(2, 3, 4).cuda()
+    result = result * (6 + 2*Utils.rank) if Utils.rank < 4 else result * (6 + 2*Utils.rank + 8)
+    print(output_data.size(), result.size())
+    print(output_data)
+    print(result)
+    assert(torch.equal(output_data, result))
+    assert(torch.equal(mappings._scatter_across_embedding_parallel_group(input_data), result))
+    Utils.destroy_model_parallel()

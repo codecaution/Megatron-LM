@@ -1,0 +1,1 @@
+torchrun --nproc_per_node=8  -m pytest tests/test_basic.py

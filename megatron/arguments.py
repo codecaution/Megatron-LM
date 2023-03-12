@@ -7,6 +7,7 @@ import os
 
 import torch
 
+
 def parse_args(extra_args_provider=None, ignore_unknown_args=False):
     """Parse all arguments."""
     parser = argparse.ArgumentParser(description='Megatron-LM Arguments',
@@ -43,8 +44,9 @@ def parse_args(extra_args_provider=None, ignore_unknown_args=False):
     # Args from environment
     args.rank = int(os.getenv('RANK', '0'))
     args.world_size = int(os.getenv("WORLD_SIZE", '1'))
-        
+
     return args
+
 
 def validate_args(args, defaults={}):
     # Tensor model parallel size.
@@ -64,7 +66,7 @@ def validate_args(args, defaults={}):
     )
     # Checks.
     model_parallel_size = args.pipeline_model_parallel_size * \
-                          args.tensor_model_parallel_size
+        args.tensor_model_parallel_size
     assert args.world_size % model_parallel_size == 0, 'world size is not'\
         ' divisible by tensor parallel size ({}) times pipeline parallel ' \
         'size ({})'.format(args.world_size, args.tensor_model_parallel_size,
@@ -80,10 +82,14 @@ def validate_args(args, defaults={}):
     if args.pipeline_model_parallel_size > 1:
         if args.pipeline_model_parallel_split_rank is not None:
             assert args.pipeline_model_parallel_split_rank < \
-                    args.pipeline_model_parallel_size, 'split rank needs'\
-                    ' to be less than pipeline model parallel size ({})'.format(
-                            args.pipeline_model_parallel_size)
-
+                args.pipeline_model_parallel_size, 'split rank needs'\
+                ' to be less than pipeline model parallel size ({})'.format(
+                    args.pipeline_model_parallel_size)
+    if args.embedding_model_parallel_size > 1:
+        assert args.embedding_model_parallel_size % args.tensor_model_parallel_size == 0 \
+            and args.data_parallel_size % ( args.embedding_model_parallel_size // args.tensor_model_parallel_size) == 0, \
+            'embedding model parallel size ({}) needs to be divisible by tensor model parallel size ({})' \
+            'and data parallel size ({})'.format(args.embedding_model_parallel_size, args.tensor_model_parallel_size, args.data_parallel_size)
     # Deprecated arguments
     assert args.batch_size is None, '--batch-size argument is no longer ' \
         'valid, use --micro-batch-size instead'
@@ -118,7 +124,7 @@ def validate_args(args, defaults={}):
                 print('WARNING: overriding default arguments for {key}:{v} \
                        with {key}:{v2}'.format(key=key, v=defaults[key],
                                                v2=getattr(args, key)),
-                                               flush=True)
+                      flush=True)
         else:
             setattr(args, key, defaults[key])
 
@@ -333,7 +339,6 @@ def validate_args(args, defaults={}):
     if args.sequence_parallel:
         args.async_tensor_model_parallel_allreduce = False
 
-
     if os.environ.get('CUDA_DEVICE_MAX_CONNECTIONS') != "1":
         if args.sequence_parallel:
             raise RuntimeError(
@@ -343,7 +348,6 @@ def validate_args(args, defaults={}):
             raise RuntimeError(
                 "Using async gradient all reduce requires setting the environment "
                 "variable CUDA_DEVICE_MAX_CONNECTIONS to 1")
-
 
     _print_args(args)
     return args
@@ -372,28 +376,29 @@ def _add_transformer_engine_args(parser):
     group = parser.add_argument_group(title='Transformer-Engine')
 
     group.add_argument('--fp8-e4m3', action='store_true',
-                        help='E4M3 TransformerLayer', dest='fp8_e4m3')
+                       help='E4M3 TransformerLayer', dest='fp8_e4m3')
     group.add_argument('--fp8-hybrid', action='store_true',
-                        help='Hybrid FP8 TransformerLayer', dest='fp8_hybrid')
+                       help='Hybrid FP8 TransformerLayer', dest='fp8_hybrid')
     group.add_argument('--no-fp8-wgrad', action='store_false',
-                        help='Execute wgrad in higher precision even for FP8 runs', dest='fp8_wgrad')
+                       help='Execute wgrad in higher precision even for FP8 runs', dest='fp8_wgrad')
     group.add_argument('--fp8-margin', type=int, default=0,
-                        help='Scaling margin for fp8', dest='fp8_margin')
+                       help='Scaling margin for fp8', dest='fp8_margin')
     group.add_argument('--fp8-interval', type=int, default=1,
-                        help='Scaling update interval for fp8', dest='fp8_interval')
+                       help='Scaling update interval for fp8', dest='fp8_interval')
     group.add_argument('--transformer-impl', default='local',
                        choices=['local', 'transformer_engine'],
                        help='Which Transformer implementation to use.',
                        dest='transformer_impl')
     group.add_argument('--fp8-amax-history-len', type=int, default=1,
-                        help='Number of steps for which amax history is recorded per tensor',
-                        dest='fp8_amax_history_len')
+                       help='Number of steps for which amax history is recorded per tensor',
+                       dest='fp8_amax_history_len')
     group.add_argument('--fp8-amax-compute-algo', default='most_recent',
                        choices=['most_recent', 'max'],
                        help='Algorithm for computing amax from history',
                        dest='fp8_amax_compute_algo')
 
     return parser
+
 
 def _add_inference_args(parser):
     group = parser.add_argument_group(title='inference')
@@ -403,7 +408,7 @@ def _add_inference_args(parser):
                        help='During inference, if batch-size times '
                        'sequence-length is smaller than this threshold '
                        'then we will not use pipelining, otherwise we will.')
-    
+
     group.add_argument('--max-tokens-to-oom',
                        type=int, default=12000,
                        help='Maximum number of tokens during inference'
@@ -411,7 +416,7 @@ def _add_inference_args(parser):
                        'Allows us to throw an error before OOM crashes server')
     return parser
 
-    
+
 def _add_network_size_args(parser):
     group = parser.add_argument_group(title='network size')
 
@@ -468,7 +473,7 @@ def _add_logging_args(parser):
     group.add_argument('--log-num-zeros-in-grad', action='store_true',
                        help='If set, calculate and log the number of zeros in gradient.')
     group.add_argument('--timing-log-level', type=int,
-                       default=0, choices=range(0,3),
+                       default=0, choices=range(0, 3),
                        help='Granularity level to measure and report timing. '
                        '   0: report only iteration time and make sure timing '
                        '      does not introduce extra overhead.'
@@ -708,7 +713,8 @@ def _add_learning_rate_args(parser):
                        'and initial warmup, the learing rate at each '
                        'iteration would be different.')
     group.add_argument('--lr-decay-style', type=str, default='linear',
-                       choices=['constant', 'linear', 'cosine', 'inverse-square-root'],
+                       choices=['constant', 'linear',
+                                'cosine', 'inverse-square-root'],
                        help='Learning rate decay function.')
     group.add_argument('--lr-decay-iters', type=int, default=None,
                        help='number of iterations to decay learning rate over,'
@@ -824,6 +830,8 @@ def _add_distributed_args(parser):
                        help='Degree of tensor model parallelism.')
     group.add_argument('--pipeline-model-parallel-size', type=int, default=1,
                        help='Degree of pipeline model parallelism.')
+    group.add_argument('--embedding-model-parallel-size', type=int, default=1,
+                       help='Degree of embedding model parallelism.')
     group.add_argument('--pipeline-model-parallel-split-rank',
                        type=int, default=None,
                        help='Rank where encoder and decoder should be split.')
@@ -857,10 +865,10 @@ def _add_distributed_args(parser):
                        'skips DDP initialization and returns function to '
                        'complete it instead.Also turns on '
                        '--use-cpu-initialization flag. This is for '
-                       'external DDP manager.' )
+                       'external DDP manager.')
     group.add_argument('--use-cpu-initialization', action='store_true',
                        default=None, help='If set, affine parallel weights '
-                       'initialization uses CPU' )
+                       'initialization uses CPU')
     group.add_argument('--empty-unused-memory-level', default=0, type=int,
                        choices=[0, 1, 2],
                        help='Call torch.cuda.empty_cache() each iteration '
@@ -991,13 +999,13 @@ def _add_biencoder_args(parser):
     # network size
     group.add_argument('--ict-head-size', type=int, default=None,
                        help='Size of block embeddings to be used in ICT and '
-                        'REALM (paper default: 128)')
+                       'REALM (paper default: 128)')
     group.add_argument('--biencoder-projection-dim', type=int, default=0,
                        help='Size of projection head used in biencoder (paper'
-                        ' default: 128)')
+                       ' default: 128)')
     group.add_argument('--biencoder-shared-query-context-model', action='store_true',
-                        help='Whether to share the parameters of the query '
-                        'and context models or not')
+                       help='Whether to share the parameters of the query '
+                       'and context models or not')
 
     # checkpointing
     group.add_argument('--ict-load', type=str, default=None,
@@ -1019,18 +1027,18 @@ def _add_biencoder_args(parser):
 
     # training
     group.add_argument('--retriever-report-topk-accuracies', nargs='+', type=int,
-                        default=[], help="Which top-k accuracies to report "
-                        "(e.g. '1 5 20')")
+                       default=[], help="Which top-k accuracies to report "
+                       "(e.g. '1 5 20')")
     group.add_argument('--retriever-score-scaling', action='store_true',
                        help='Whether to scale retriever scores by inverse '
-                        'square root of hidden size')
+                       'square root of hidden size')
 
     # faiss index
     group.add_argument('--block-data-path', type=str, default=None,
                        help='Where to save/load BlockData to/from')
     group.add_argument('--embedding-path', type=str, default=None,
                        help='Where to save/load Open-Retrieval Embedding'
-                        ' data to/from')
+                       ' data to/from')
 
     # indexer
     group.add_argument('--indexer-batch-size', type=int, default=128,
@@ -1078,14 +1086,14 @@ def _add_vision_args(parser):
     group.add_argument('--swin-backbone-type', type=str, default='tiny',
                        choices=['tiny', 'base', 'h3'],
                        help='pretraining objectives')
-    
+
     # inpainting arguments
     group.add_argument('--mask-type', type=str, default='random',
                        choices=['random', 'row'],
                        help='mask types')
     group.add_argument('--mask-factor', type=float, default=1.0,
                        help='mask size scaling parameter')
- 
+
     # dino arguments
     group.add_argument('--iter-per-epoch', type=int, default=1250,
                        help='iterations per epoch')

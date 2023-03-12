@@ -17,6 +17,9 @@ from megatron.core.parallel_state import (
     get_tensor_model_parallel_rank,
     get_tensor_model_parallel_world_size,
     get_tensor_model_parallel_group,
+    get_embedding_model_parallel_rank,
+    get_embedding_model_parallel_world_size,
+    get_embedding_model_parallel_group,
     get_global_memory_buffer,
 )
 from .mappings import (
@@ -24,8 +27,11 @@ from .mappings import (
     gather_from_tensor_model_parallel_region,
     gather_from_sequence_parallel_region,
     reduce_from_tensor_model_parallel_region,
+    reduce_from_embedding_model_parallel_region,
     scatter_to_tensor_model_parallel_region,
     reduce_scatter_to_sequence_parallel_region,
+    gather_from_embedding_model_parallel_region,
+    _exchange_across_embedding_parallel_group,
 )
 
 from .random import get_cuda_rng_tracker
@@ -127,7 +133,48 @@ def _initialize_affine_weight_cpu(weight, output_size, input_size,
         return master_weight
     return None
 
+def _initialize_affine_weight_embedding_parallel_cpu(weight, output_size, input_size,
+                                  per_partition_size, partition_dim,
+                                  init_method, stride=1,
+                                  return_master_weight=False,
+                                  *, params_dtype=torch.float32):
+    """Initialize affine weight for model parallel.
 
+    Build the master weight on all processes and scatter
+    the relevant chunk."""
+
+    set_tensor_model_parallel_attributes(tensor=weight,
+                                         is_parallel=True,
+                                         dim=partition_dim,
+                                         stride=stride)
+
+    # Initialize master weight
+    master_weight = torch.empty(output_size, input_size,
+                                dtype=torch.float,
+                                requires_grad=False)
+    init_method(master_weight)
+    master_weight = master_weight.to(dtype=params_dtype)
+
+    # Split and copy
+    per_partition_per_stride_size = divide(per_partition_size, stride)
+    weight_list = torch.split(master_weight, per_partition_per_stride_size,
+                              dim=partition_dim)
+
+    ep_rank = get_embedding_model_parallel_rank()
+    ep_size = get_embedding_model_parallel_world_size()
+    tp_size = get_tensor_model_parallel_world_size()
+    offset = ep_rank // tp_size
+    row = ep_rank % tp_size
+    stride = ep_size // tp_size
+
+    my_weight_list = weight_list[row * stride + offset::ep_size]
+
+    with torch.no_grad():
+        torch.cat(my_weight_list, dim=partition_dim, out=weight)
+    if return_master_weight:
+        return master_weight
+    return None
+    
 class VocabParallelEmbedding(torch.nn.Module):
     """Embedding parallelized in the vocabulary dimension.
 
@@ -161,11 +208,18 @@ class VocabParallelEmbedding(torch.nn.Module):
         self.sparse = False
         self._weight = None
         self.tensor_model_parallel_size = get_tensor_model_parallel_world_size()
+        self.embedding_model_parallel_size = get_embedding_model_parallel_world_size()
         # Divide the weight matrix along the vocaburaly dimension.
-        self.vocab_start_index, self.vocab_end_index = \
-            VocabUtility.vocab_range_from_global_vocab_size(
-                self.num_embeddings, get_tensor_model_parallel_rank(),
-                self.tensor_model_parallel_size)
+        if self.embedding_model_parallel_size > 1:
+            self.vocab_start_index, self.vocab_end_index = \
+                VocabUtility.vocab_range_from_global_vocab_size_ep(
+                    self.num_embeddings, get_embedding_model_parallel_rank(),
+                    self.embedding_model_parallel_size, self.tensor_model_parallel_size)     
+        else:
+            self.vocab_start_index, self.vocab_end_index = \
+                VocabUtility.vocab_range_from_global_vocab_size(
+                    self.num_embeddings, get_tensor_model_parallel_rank(),
+                    self.tensor_model_parallel_size)
         self.num_embeddings_per_partition = self.vocab_end_index - \
             self.vocab_start_index
 
@@ -175,10 +229,17 @@ class VocabParallelEmbedding(torch.nn.Module):
                 self.num_embeddings_per_partition, self.embedding_dim,
                 dtype=params_dtype))
             if perform_initialization:
-                _initialize_affine_weight_cpu(
+                if self.embedding_model_parallel_size > 1:
+                    _initialize_affine_weight_embedding_parallel_cpu(
                     self.weight, self.num_embeddings, self.embedding_dim,
                     self.num_embeddings_per_partition, 0, init_method,
                     params_dtype=params_dtype)
+                    self.weight.param_name = "word_embedding_in_ep"
+                else:
+                    _initialize_affine_weight_cpu(
+                        self.weight, self.num_embeddings, self.embedding_dim,
+                        self.num_embeddings_per_partition, 0, init_method,
+                        params_dtype=params_dtype)
         else:
             self.weight = Parameter(torch.empty(
                 self.num_embeddings_per_partition, self.embedding_dim,
@@ -189,6 +250,8 @@ class VocabParallelEmbedding(torch.nn.Module):
 
     def forward(self, input_):
         if self.tensor_model_parallel_size > 1:
+            if self.embedding_model_parallel_size > 1:
+                input_ = gather_from_embedding_model_parallel_region(input_)
             # Build the mask.
             input_mask = (input_ < self.vocab_start_index) | \
                          (input_ >= self.vocab_end_index)
@@ -205,22 +268,25 @@ class VocabParallelEmbedding(torch.nn.Module):
         # Mask the output embedding.
         if self.tensor_model_parallel_size > 1:
             output_parallel[input_mask, :] = 0.0
+        if self.embedding_model_parallel_size > 1:
+            output_parallel = reduce_from_embedding_model_parallel_region(output_parallel)
         # Reduce across all the model parallel GPUs.
         output = reduce_from_tensor_model_parallel_region(output_parallel)
         return output
-
 
 class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
     """See linear_with_grad_accumulation_and_async_allreduce"""
 
     @staticmethod
     def forward(ctx, input, weight, bias, gradient_accumulation_fusion,
-                async_grad_allreduce, sequence_parallel):
+                async_grad_allreduce, sequence_parallel, parallel_logits = False):
         ctx.save_for_backward(input, weight)
         ctx.use_bias = bias is not None
         ctx.gradient_accumulation_fusion = gradient_accumulation_fusion
         ctx.async_grad_allreduce = async_grad_allreduce
         ctx.sequence_parallel = sequence_parallel
+        ctx.embedding_parallel = get_embedding_model_parallel_world_size() > 1
+        ctx.parallel_logits = parallel_logits
 
         if sequence_parallel:
             world_size = get_tensor_model_parallel_world_size()
@@ -236,16 +302,29 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
             total_input = all_gather_buffer
         else:
             total_input = input
-
+        
+        if ctx.embedding_parallel and parallel_logits:
+            total_input = _exchange_across_embedding_parallel_group(total_input, extend_input=True, reduce_output=False)
+        
         output = torch.matmul(total_input, weight.t())
+        
+        if ctx.embedding_parallel and parallel_logits:
+            output = _exchange_across_embedding_parallel_group(output, extend_input=False, reduce_output=False)
+            output = torch.cat(torch.chunk(output, get_embedding_model_parallel_world_size()//get_tensor_model_parallel_world_size(), dim = 0), dim=-1)
+        
         if bias is not None:
             output = output + bias
+        
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
         input, weight = ctx.saved_tensors
         use_bias = ctx.use_bias
+
+        if ctx.embedding_parallel and ctx.parallel_logits:
+            grad_output = torch.cat(torch.chunk(grad_output, get_embedding_model_parallel_world_size()//get_tensor_model_parallel_world_size(), dim = -1), dim = 0)
+            grad_output = _exchange_across_embedding_parallel_group(grad_output, extend_input=False, reduce_output=False)
 
         if ctx.sequence_parallel:
             world_size = get_tensor_model_parallel_world_size()
@@ -264,6 +343,11 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
             total_input = all_gather_buffer
         else:
             total_input = input
+
+        if ctx.embedding_parallel and ctx.parallel_logits:
+            total_input = _exchange_across_embedding_parallel_group(total_input, extend_input=True, reduce_output=False)
+            total_input = total_input
+        
         grad_input = grad_output.matmul(weight)
 
         if ctx.sequence_parallel:
@@ -306,7 +390,15 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
             grad_weight = None
         else:
             grad_weight = grad_output.t().matmul(total_input)
+
         grad_bias = grad_output.sum(dim=0) if use_bias else None
+
+        if ctx.embedding_parallel and ctx.parallel_logits:
+            grad_input = reduce_from_embedding_model_parallel_region(grad_input)
+            scale = get_tensor_model_parallel_world_size() / get_embedding_model_parallel_world_size()
+            grad_weight = scale * grad_weight 
+            grad_bias = scale * grad_bias if use_bias else None
+            # grad_weight = grad_weight / (get_embedding_model_parallel_world_size()//get_tensor_model_parallel_world_size())
 
         if ctx.sequence_parallel:
             handle.wait()
@@ -324,6 +416,7 @@ def linear_with_grad_accumulation_and_async_allreduce(
     gradient_accumulation_fusion: bool,
     async_grad_allreduce: bool,
     sequence_parallel_enabled: bool,
+    parallel_logits: bool,
 ) -> torch.Tensor:
     """Linear layer execution with asynchronous communication and
     gradient accumulation fusion in backprop.
@@ -554,6 +647,7 @@ class ColumnParallelLinear(torch.nn.Module):
             gradient_accumulation_fusion=self.gradient_accumulation_fusion,
             async_grad_allreduce=self.async_tensor_model_parallel_allreduce,
             sequence_parallel_enabled=self.sequence_parallel_enabled,
+            parallel_logits=False,
         )
         if self.gather_output:
             # All-gather across the partitions.
@@ -691,6 +785,7 @@ class RowParallelLinear(torch.nn.Module):
             gradient_accumulation_fusion=self.gradient_accumulation_fusion,
             async_grad_allreduce=False,
             sequence_parallel_enabled=False,
+            parallel_logits=False,
         )
 
         # All-reduce across all the partitions.

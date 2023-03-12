@@ -1,10 +1,10 @@
 # Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
 
-from mpu import layers
 from commons import set_random_seed
 from commons import print_separator
 from commons import initialize_distributed
 import mpu
+from mpu import layers
 from torch.nn.parameter import Parameter
 import torch.nn.init as init
 import torch
