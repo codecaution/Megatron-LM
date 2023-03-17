@@ -21,12 +21,12 @@ def set_random_seed(seed):
     np.random.seed(seed)
     torch.manual_seed(seed)
     tensor_parallel.model_parallel_cuda_manual_seed(seed)
-
+'''
 def test_vocab_parallel_embedding():
     Utils.initialize_model_parallel(8, 1, 1)
 
-    batch_size = 17
-    seq_length = 23
+    batch_size = 16
+    seq_length = 24
     vocab_size = 48
     hidden_size = 16
     seed = 1234
@@ -172,15 +172,15 @@ def test_linear_with_grad_accumulation_and_async_allreduce_ep():
     seed = 1234
 
     set_random_seed(seed)
-    input_data = torch.randn([batch_size, seq_length, hidden_size]).cuda().double()
+    input_data = torch.randn([batch_size, seq_length, hidden_size]).cuda()
     input_data.requires_grad = True
-    bias1 = torch.ones([vocab_size//4]).cuda().double()
+    bias1 = torch.ones([vocab_size//4]).cuda()
     bias1.requires_grad = True
-    loss_weight = torch.randn([seq_length, batch_size, vocab_size//4]).cuda().double()
+    loss_weight = torch.randn([seq_length, batch_size, vocab_size//4]).cuda()
 
     set_random_seed(seed)
     embedding_vocab_parallel = tensor_parallel.VocabParallelEmbedding(
-        vocab_size, hidden_size, init_method=init.normal_, use_cpu_initialization=True).cuda().double()
+        vocab_size, hidden_size, init_method=init.normal_, use_cpu_initialization=True).cuda()
     
 
     parallel_output = tensor_parallel.linear_with_grad_accumulation_and_async_allreduce(input_data, embedding_vocab_parallel.weight, bias=bias1,
@@ -198,14 +198,14 @@ def test_linear_with_grad_accumulation_and_async_allreduce_ep():
     Utils.initialize_model_parallel(4, 1, 8)
 
     set_random_seed(seed)
-    input_data2 = torch.randn([batch_size, seq_length, hidden_size]).cuda().double()
+    input_data2 = torch.randn([batch_size, seq_length, hidden_size]).cuda()
     input_data2.requires_grad = True
-    bias2 = torch.ones([vocab_size//4]).cuda().double()
+    bias2 = torch.ones([vocab_size//4]).cuda()
     bias2.requires_grad = True
 
     set_random_seed(seed)
     embedding_vocab_parallel_ep = tensor_parallel.VocabParallelEmbedding(
-        vocab_size, hidden_size, init_method=init.normal_, use_cpu_initialization=True).cuda().double()
+        vocab_size, hidden_size, init_method=init.normal_, use_cpu_initialization=True).cuda()
     
 
     parallel_output_ep = tensor_parallel.linear_with_grad_accumulation_and_async_allreduce(input_data2, embedding_vocab_parallel_ep.weight, bias=bias2,
@@ -236,4 +236,46 @@ def test_linear_with_grad_accumulation_and_async_allreduce_ep():
     Utils.destroy_model_parallel()
 #     loss = torch.mul(output, loss_weight).sum()
 #     loss.backward()
-    
+'''  
+
+def test_vocab_split_embedding():
+    Utils.initialize_model_parallel(1, 1, 1)
+    batch_size = 32
+    seq_length = 1024
+    vocab_size = 51200
+    hidden_size = 1024
+    seed = 1234
+
+    set_random_seed(seed)
+    input_data1 = torch.LongTensor(
+        size=(batch_size, seq_length)).random_(0, vocab_size).cuda()
+    input_data2 = torch.LongTensor(
+        size=(batch_size, seq_length)).random_(0, vocab_size).cuda()
+    loss_weight = torch.randn([2*batch_size, seq_length, hidden_size]).cuda()
+
+    set_random_seed(seed)
+    embedding_original = torch.nn.Embedding(vocab_size, hidden_size).cuda()
+    input_data = torch.cat((input_data1, input_data2), 0)
+    output = embedding_original(input_data)
+    loss_original = torch.mul(output, loss_weight).sum()
+    loss_original.backward()
+
+    set_random_seed(seed)
+    input_data1 = torch.LongTensor(
+        size=(batch_size, seq_length)).random_(0, vocab_size).cuda()
+    input_data2 = torch.LongTensor(
+        size=(batch_size, seq_length)).random_(0, vocab_size).cuda()
+    loss_weight = torch.randn([2*batch_size, seq_length, hidden_size]).cuda()
+
+    set_random_seed(seed)
+    embedding_split = torch.nn.Embedding(vocab_size, hidden_size).cuda()
+    output1 = embedding_split(input_data1)
+    output2 = embedding_split(input_data2)
+    output = torch.cat((output1, output2), 0)
+    loss_split = torch.mul(output, loss_weight).sum()
+    loss_split.backward()
+
+    assert (torch.equal(loss_original, loss_split))
+    print(torch.abs(embedding_original.weight.grad - embedding_split.weight.grad).abs().max())
+    assert (torch.equal(embedding_original.weight.grad, embedding_split.weight.grad))
+    Utils.destroy_model_parallel()

@@ -250,7 +250,7 @@ class VocabParallelEmbedding(torch.nn.Module):
                                               partition_dim=0, stride=1)
 
     def forward(self, input_):
-        split = True
+        split = False
         if self.tensor_model_parallel_size > 1:
             if self.embedding_model_parallel_size > 1:
                 input_ = gather_from_embedding_model_parallel_region(input_)
