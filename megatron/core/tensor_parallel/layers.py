@@ -174,6 +174,7 @@ def _initialize_affine_weight_embedding_parallel_cpu(weight, output_size, input_
     if return_master_weight:
         return master_weight
     return None
+
     
 class VocabParallelEmbedding(torch.nn.Module):
     """Embedding parallelized in the vocabulary dimension.
@@ -249,6 +250,7 @@ class VocabParallelEmbedding(torch.nn.Module):
                                               partition_dim=0, stride=1)
 
     def forward(self, input_):
+        split = True
         if self.tensor_model_parallel_size > 1:
             if self.embedding_model_parallel_size > 1:
                 input_ = gather_from_embedding_model_parallel_region(input_)
@@ -260,11 +262,23 @@ class VocabParallelEmbedding(torch.nn.Module):
             masked_input[input_mask] = 0
         else:
             masked_input = input_
+        if self.embedding_model_parallel_size > 1 and split:
+            input_list = torch.chunk(masked_input, 2, dim=0)
+            output_list = []
+            for input in input_list:
+                output_list.append(
+                    F.embedding(input, self.weight,
+                                        self.padding_idx, self.max_norm,
+                                        self.norm_type, self.scale_grad_by_freq,
+                                        self.sparse)
+                )
+            output_parallel = torch.cat(output_list, dim=0)
+        else:
             # Get the embeddings.
-        output_parallel = F.embedding(masked_input, self.weight,
-                                      self.padding_idx, self.max_norm,
-                                      self.norm_type, self.scale_grad_by_freq,
-                                      self.sparse)
+            output_parallel = F.embedding(masked_input, self.weight,
+                                        self.padding_idx, self.max_norm,
+                                        self.norm_type, self.scale_grad_by_freq,
+                                        self.sparse)
         # Mask the output embedding.
         if self.tensor_model_parallel_size > 1:
             output_parallel[input_mask, :] = 0.0
@@ -273,6 +287,21 @@ class VocabParallelEmbedding(torch.nn.Module):
         # Reduce across all the model parallel GPUs.
         output = reduce_from_tensor_model_parallel_region(output_parallel)
         return output
+
+class IdentityFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x
+    @staticmethod
+    def backward(ctx, grad):
+        torch.cuda.synchronize()
+        if torch.distributed.get_rank() in (0,):
+            print(grad.size(), grad)
+        assert False
+        return grad
+
+def indentity_function(x)-> torch.Tensor:
+    return IdentityFunction.apply(x)
 
 class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
     """See linear_with_grad_accumulation_and_async_allreduce"""
@@ -406,7 +435,6 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
 
         if ctx.async_grad_allreduce:
             handle.wait()
-
         return grad_input, grad_weight, grad_bias, None, None, None, None
 
 def linear_with_grad_accumulation_and_async_allreduce(

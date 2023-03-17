@@ -56,6 +56,7 @@ def _exchange_across_embedding_parallel_group(input_, extend_input=True, reduce_
         output = sum(torch.chunk(output, num_pieces))
     return output
 
+
 '''
 def _gather_across_embedding_parallel_group(input_, extend=True):
     """Gather tensors across embedding parallel group."""
@@ -109,6 +110,7 @@ def _scatter_across_embedding_parallel_group(input_):
     output = sum(torch.chunk(output, num_pieces))
     return output
 '''
+
 
 def _split_along_last_dim(input_):
     """Split the tensor along its last dimension and keep the

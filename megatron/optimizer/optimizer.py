@@ -225,6 +225,7 @@ class MegatronOptimizer(ABC):
                     grad = word_embeddings_weight.main_grad
                 else:
                     grad = word_embeddings_weight.grad
+                
                 torch.distributed.all_reduce(grad, group=mpu.get_embedding_group())
 
 
@@ -278,7 +279,7 @@ class MegatronOptimizer(ABC):
 
     def reduce_model_grads(self, args, timers):
         """All-reduce all grads, and all-reduce embeddings."""
-
+        
         # All-reduce layer-norm grads (for sequence parallelism).
         timers('layernorm-grads-all-reduce', log_level=1).start(
             barrier=args.barrier_with_L1_time)
@@ -298,6 +299,7 @@ class MegatronOptimizer(ABC):
             barrier=args.barrier_with_L1_time)
         self.allreduce_embedding_grads(args)
         timers('embedding-grads-all-reduce').stop()
+        
 
 
 class MixedPrecisionOptimizer(MegatronOptimizer):
@@ -444,7 +446,7 @@ class MixedPrecisionOptimizer(MegatronOptimizer):
         num_zeros_in_grad = self.count_zeros() if \
                             self.log_num_zeros_in_grad else None
         timers('optimizer-count-zeros').stop()
-
+    
         # Step the optimizer.
         timers('optimizer-inner-step', log_level=1).start(
             barrier=args.barrier_with_L1_time)

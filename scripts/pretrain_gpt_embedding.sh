@@ -11,7 +11,7 @@ NODE_RANK=0
 WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
 
 DATA_PATH=/jizhicfs/xiaonan/deepspeed/downloads/webtext2/my-gpt2_text_document
-CHECKPOINT_PATH=/jizhicfs/xiaonan/deepspeed/results
+CHECKPOINT_PATH=/jizhicfs/xiaonan/logs/ep/
 VOCAB_PATH=/jizhicfs/xiaonan/deepspeed/downloads/webtext2
 
 DISTRIBUTED_ARGS="--nproc_per_node $GPUS_PER_NODE --nnodes $NNODES --node_rank $NODE_RANK --master_addr $MASTER_ADDR --master_port $MASTER_PORT"
@@ -24,7 +24,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS \
        --micro-batch-size 8 \
        --tensor-model-parallel-size 4 \
        --embedding-model-parallel-size 8 \
-       --global-batch-size 64 \
+       --global-batch-size 16 \
        --seq-length 1024 \
        --max-position-embeddings 1024 \
        --use-cpu-initialization \
@@ -38,17 +38,17 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS \
        --data-impl mmap \
        --split 949,50,1 \
        --distributed-backend nccl \
-       --lr 0.00015 \
+       --lr 1 \
        --lr-decay-style cosine \
-       --min-lr 1.0e-5 \
+       --min-lr 1 \
        --weight-decay 1e-2 \
        --clip-grad 1.0 \
        --lr-warmup-fraction .01 \
        --recompute-activations \
        --recompute-granularity full \
        --no-async-tensor-model-parallel-allreduce \
+       --no-gradient-accumulation-fusion \
        --log-interval 100 \
        --save-interval 500000 \
        --eval-interval 1000 \
-       --eval-iters 10 \
-       --fp16  2>&1 | tee -a /home/logs/GPT_8GPU_tp4_ep8.log
+       --eval-iters 10 2>&1 | tee -a /home/logs/GPT_8GPU_tp4_ep8.log

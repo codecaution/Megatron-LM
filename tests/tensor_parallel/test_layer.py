@@ -66,8 +66,8 @@ def test_vocab_parallel_embedding():
 def test_embedding_parallel_embedding():
     batch_size = 32
     seq_length = 24
-    vocab_size = 48
-    hidden_size = 64
+    vocab_size = 1024
+    hidden_size = 128
     seed = 1234
 
     Utils.initialize_model_parallel(4, 1, 1)
@@ -75,11 +75,11 @@ def test_embedding_parallel_embedding():
     set_random_seed(seed)
     input_data1 = torch.LongTensor(
         size=(batch_size, seq_length)).random_(0, vocab_size).cuda()
-    loss_weight1 = torch.randn([batch_size, seq_length, hidden_size]).cuda().double()
+    loss_weight1 = torch.randn([batch_size, seq_length, hidden_size]).cuda()
 
     set_random_seed(seed)
     embedding_vocab_parallel = tensor_parallel.VocabParallelEmbedding(
-        vocab_size, hidden_size, init_method=init.normal_, use_cpu_initialization=True).cuda().double()
+        vocab_size, hidden_size, init_method=init.normal_, use_cpu_initialization=True).cuda()
     parallel_output = embedding_vocab_parallel(input_data1)
     loss_vocab_parallel = torch.mul(parallel_output, loss_weight1).sum()
     loss_vocab_parallel.backward()
@@ -91,11 +91,11 @@ def test_embedding_parallel_embedding():
     set_random_seed(seed)
     input_data2 = torch.LongTensor(
         size=(batch_size, seq_length)).random_(0, vocab_size).cuda()
-    loss_weight2 = torch.randn([batch_size, seq_length, hidden_size]).cuda().double()
+    loss_weight2 = torch.randn([batch_size, seq_length, hidden_size]).cuda()
 
     set_random_seed(seed)
     embedding_vocab_parallel_ep = tensor_parallel.VocabParallelEmbedding(
-        vocab_size, hidden_size, init_method=init.normal_, use_cpu_initialization=True).cuda().double()
+        vocab_size, hidden_size, init_method=init.normal_, use_cpu_initialization=True).cuda()
     parallel_output = embedding_vocab_parallel_ep(input_data2)
     loss_vocab_parallel_ep = torch.mul(parallel_output, loss_weight2).sum()
     loss_vocab_parallel_ep.backward()
@@ -103,16 +103,16 @@ def test_embedding_parallel_embedding():
     torch.distributed.barrier()
     # assert(torch.allclose(loss_original, loss_vocab_parallel))
     assert (torch.equal(loss_vocab_parallel, loss_vocab_parallel_ep))
-    # print(torch.abs(embedding_vocab_parallel.weight.grad - embedding_vocab_parallel_ep.weight.grad).max())
-    # assert (torch.equal(embedding_vocab_parallel.weight.grad, embedding_vocab_parallel_ep.weight.grad))
-    # assert (torch.allclose(embedding_vocab_parallel.weight.grad, embedding_vocab_parallel_ep.weight.grad, atol=1e-12))
     if get_embedding_model_parallel_rank() < 4:
-        print(torch.abs(embedding_vocab_parallel.weight.grad[:(vocab_size // get_embedding_model_parallel_world_size())] - embedding_vocab_parallel_ep.weight.grad).max())
-        assert (torch.allclose(embedding_vocab_parallel.weight.grad[:(vocab_size // get_embedding_model_parallel_world_size())], embedding_vocab_parallel_ep.weight.grad, atol=1e-12))
+        # print(torch.abs(embedding_vocab_parallel.weight.grad[:(vocab_size // get_embedding_model_parallel_world_size())] - embedding_vocab_parallel_ep.weight.grad).max())
+        # assert (torch.allclose(embedding_vocab_parallel.weight.grad[:(vocab_size // get_embedding_model_parallel_world_size())], embedding_vocab_parallel_ep.weight.grad, atol=1e-12))
+        print(f"xxxxxxx, {(embedding_vocab_parallel.weight.grad[:(vocab_size // get_embedding_model_parallel_world_size())] - embedding_vocab_parallel_ep.weight.grad).abs().max()}")
+        assert (torch.equal(embedding_vocab_parallel.weight.grad[:(vocab_size // get_embedding_model_parallel_world_size())], embedding_vocab_parallel_ep.weight.grad))
     else:
-        print(torch.abs(embedding_vocab_parallel.weight.grad[(vocab_size // get_embedding_model_parallel_world_size()):] - embedding_vocab_parallel_ep.weight.grad).max())
-        assert (torch.allclose(embedding_vocab_parallel.weight.grad[(vocab_size // get_embedding_model_parallel_world_size()):], embedding_vocab_parallel_ep.weight.grad, atol=1e-12))
-
+        # print(torch.abs(embedding_vocab_parallel.weight.grad[(vocab_size // get_embedding_model_parallel_world_size()):] - embedding_vocab_parallel_ep.weight.grad).max())
+        # assert (torch.allclose(embedding_vocab_parallel.weight.grad[(vocab_size // get_embedding_model_parallel_world_size()):], embedding_vocab_parallel_ep.weight.grad, atol=1e-12))
+        print(f"xxxxxxx, {(embedding_vocab_parallel.weight.grad[(vocab_size // get_embedding_model_parallel_world_size()):] - embedding_vocab_parallel_ep.weight.grad).abs().max()}")
+        assert (torch.equal(embedding_vocab_parallel.weight.grad[(vocab_size // get_embedding_model_parallel_world_size()):], embedding_vocab_parallel_ep.weight.grad))
     Utils.destroy_model_parallel()
 
     

@@ -15,6 +15,7 @@ from megatron.training import pretrain
 from megatron.utils import get_ltor_masks_and_position_ids
 from megatron.utils import average_losses_across_data_parallel_group
 
+iteration = 0
 def model_provider(pre_process=True, post_process=True):
     """Build the model."""
 
@@ -60,15 +61,16 @@ def get_batch(data_iterator):
     return tokens, labels, loss_mask, attention_mask, position_ids
 
 def loss_func(loss_mask, output_tensor):
+    global iteration
+    iteration += 1
     losses = output_tensor.float()
     loss_mask = loss_mask.view(-1).float()
     loss = torch.sum(losses.view(-1) * loss_mask) / loss_mask.sum()
 
     # Reduce loss for logging.
     averaged_loss = average_losses_across_data_parallel_group([loss])
-
+    print_rank_0(f'iteration: {iteration}, loss: {loss}, lm loss: {averaged_loss[0]}')
     return loss, {'lm loss': averaged_loss[0]}
-
 
 def forward_step(data_iterator, model):
     """Forward step."""
@@ -83,7 +85,7 @@ def forward_step(data_iterator, model):
 
     output_tensor = model(tokens, position_ids, attention_mask,
                           labels=labels)
-
+    
     return output_tensor, partial(loss_func, loss_mask)
 
 
