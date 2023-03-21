@@ -66,7 +66,9 @@ class GPTModel(MegatronModule):
             scaled_init_method=scaled_init_method_normal(args.init_method_std,
                                                          args.num_layers),
             pre_process=self.pre_process,
-            post_process=self.post_process)
+            post_process=self.post_process,
+            parallel_output=self.parallel_output,
+            fp16_lm_cross_entropy=self.fp16_lm_cross_entropy)
 
         self.initialize_word_embeddings(init_method_normal)
 
@@ -81,16 +83,21 @@ class GPTModel(MegatronModule):
             input_ids,
             position_ids,
             attention_mask,
-            inference_params=inference_params)
+            labels=labels,
+            tokentype_ids=tokentype_ids,
+            inference_params=inference_params,
+            word_embeddings_weight=self.word_embeddings_weight())
 
-        if self.post_process:
+        """if self.post_process:
             return post_language_model_processing(
                 lm_output, labels,
                 self.word_embeddings_weight(),
                 self.parallel_output,
                 self.fp16_lm_cross_entropy)
         else:
-            return lm_output
+            return lm_output"""
+
+        return lm_output
 
     def state_dict_for_save_checkpoint(self, prefix='', keep_vars=False):
 

@@ -942,7 +942,8 @@ class ParallelTransformer(MegatronModule):
                     layer_number,
                     layer_type=layer_type,
                     self_attn_mask_type=self_attn_mask_type,
-                    drop_path_rate=self.drop_path_rates[layer_number - 1])
+                    drop_path_rate=0.0 if args.standalone_embedding_stage else self.drop_path_rates[layer_number - 1])
+                    #drop_path_rate=self.drop_path_rates[layer_number - 1])
             else:
                 return transformer_engine.pytorch.TransformerLayer(
                     args.hidden_size,

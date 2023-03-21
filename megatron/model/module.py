@@ -39,11 +39,13 @@ class MegatronModule(torch.nn.Module):
     def word_embeddings_weight(self):
         if self.pre_process:
             return self.language_model.embedding.word_embeddings.weight
-        else:
+        elif self.post_process:
             if not self.share_word_embeddings:
                 raise Exception('word_embeddings_weight() called for last '
                                 'stage, but share_word_embeddings is false')
-            return self.word_embeddings.weight
+            return self.word_embeddings.weight  
+        else:
+            return None
 
 
     def initialize_word_embeddings(self, init_method_normal):

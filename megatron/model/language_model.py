@@ -44,13 +44,43 @@ def parallel_lm_logits(input_, word_embeddings_weight, parallel_output,
 
     return tensor_parallel.gather_from_tensor_model_parallel_region(logits_parallel)
 
+class LM_Logits(MegatronModule):
+
+    def __init__(self):
+        super(LM_Logits, self).__init__()
+        self.input_tensor = None
+
+    def forward(self, lm_output, labels, logit_weights, parallel_output, fp16_lm_cross_entropy):
+
+        if lm_output == None:
+            lm_output = self.input_tensor
+        
+
+        output = parallel_lm_logits(lm_output, logit_weights, parallel_output)
+        if labels is None:
+            return output.transpose(0,1).contiguous()
+        else:
+            labels = labels.transpose(0,1).contiguous()
+            if fp16_lm_cross_entropy:
+                assert output.dtype == torch.half
+                loss = tensor_parallel.vocab_parallel_cross_entropy(output, labels)
+            else:
+                loss = tensor_parallel.vocab_parallel_cross_entropy(output.float(), labels)
+
+        loss = loss.transpose(0,1).contiguous()
+        return loss
+
+    def set_input_tensor(self, input_tensor):
+        self.input_tensor = input_tensor
+
 
 def get_language_model(num_tokentypes, add_pooler,
                        encoder_attn_mask_type, init_method=None,
                        scaled_init_method=None, add_encoder=True,
                        add_decoder=False,
                        decoder_attn_mask_type=AttnMaskType.causal,
-                       pre_process=True, post_process=True):
+                       pre_process=True, post_process=True,
+                       parallel_output=True, fp16_lm_cross_entropy=False):
     """Build language model and return along with the key to save."""
     args = get_args()
 
@@ -323,7 +353,9 @@ class TransformerLanguageModel(MegatronModule):
                  decoder_attn_mask_type=AttnMaskType.causal,
                  add_pooler=False,
                  pre_process=True,
-                 post_process=True):
+                 post_process=True,
+                 parallel_output=True,
+                 fp16_lm_cross_entropy=False):
         super(TransformerLanguageModel, self).__init__()
         args = get_args()
 
@@ -338,6 +370,8 @@ class TransformerLanguageModel(MegatronModule):
         self.decoder_attn_mask_type = decoder_attn_mask_type
         self.add_pooler = add_pooler
         self.encoder_hidden_state = None
+        self.parallel_output=parallel_output
+        self.fp16_lm_cross_entropy=fp16_lm_cross_entropy
 
         # Embeddings.
         if self.pre_process:
@@ -353,14 +387,19 @@ class TransformerLanguageModel(MegatronModule):
         # Encoder (usually set to True, False if part of an encoder-decoder
         # architecture and in encoder-only stage).
         if self.add_encoder:
-            self.encoder = ParallelTransformer(
-                self.init_method,
-                output_layer_init_method,
-                self_attn_mask_type=self.encoder_attn_mask_type,
-                pre_process=self.pre_process,
-                post_process=self.post_process
-            )
-            self._encoder_key = 'encoder'
+            if not self.post_process:
+                self.encoder = ParallelTransformer(
+                    self.init_method,
+                    output_layer_init_method,
+                    self_attn_mask_type=self.encoder_attn_mask_type,
+                    pre_process=self.pre_process,
+                    post_process=self.post_process
+                )
+                self._encoder_key = 'encoder'
+            else:
+            # a false encoder
+                self.encoder = LM_Logits()
+                self._encoder_key = 'encoder'
         else:
             self.encoder = None
 
@@ -414,10 +453,10 @@ class TransformerLanguageModel(MegatronModule):
 
     def forward(self, enc_input_ids, enc_position_ids, enc_attn_mask,
                 dec_input_ids=None, dec_position_ids=None, dec_attn_mask=None,
-                enc_dec_attn_mask=None, tokentype_ids=None,
+                enc_dec_attn_mask=None, labels=None, tokentype_ids=None,
                 inference_params=None,
                 pooling_sequence_index=0,
-                enc_hidden_states=None, output_enc_hidden=False):
+                enc_hidden_states=None, output_enc_hidden=False, word_embeddings_weight=None):
 
         # Encoder embedding.
         if self.pre_process:
@@ -429,10 +468,20 @@ class TransformerLanguageModel(MegatronModule):
         # Run encoder.
         if enc_hidden_states is None:
             if self.encoder is not None:
-                encoder_output = self.encoder(
-                    encoder_input,
-                    enc_attn_mask,
-                    inference_params=inference_params)
+                if not self.post_process:
+                    encoder_output = self.encoder(
+                        encoder_input,
+                        enc_attn_mask,
+                        inference_params=inference_params)
+                else:
+                    # false encoder
+                    encoder_output = self.encoder(
+                                encoder_input,
+                                labels,
+                                word_embeddings_weight,
+                                self.parallel_output,
+                                self.fp16_lm_cross_entropy
+                            )
             else:
                 encoder_output = self.encoder_hidden_state
         else:
